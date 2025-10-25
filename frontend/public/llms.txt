@@ -1,0 +1,17 @@
+# llms.txt for ThisBanana.com
+# Version 1.0 | October 8, 2025
+
+User-agent: *
+
+# Disallow AI model training
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: ChatGPT-User
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+# Allow real-time answer generation with attribution
+# For questions, contact info@thisbanana.com
