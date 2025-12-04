@@ -1,5 +1,19 @@
+# Node
 node_modules/
+npm-debug.log*
+yarn-error.log
+pnpm-lock.yaml
+package-lock.json
+
+# Env
 .env
-.env.*
+.env.* 
+
+# Build / Dist
 dist/
 build/
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
