@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 
-const Hero = ({ onScanComplete }) => {
+const Hero = () => {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const { user, session } = useAuth();
+  const navigate = useNavigate();
 
   const handleScan = async (e) => {
     e.preventDefault();
@@ -16,7 +20,6 @@ const Hero = ({ onScanComplete }) => {
       return;
     }
 
-    // Basic URL validation
     const urlPattern = /^https?:\/\/.+/i;
     if (!urlPattern.test(url)) {
       setError('Please enter a valid URL (must start with http:// or https://)');
@@ -26,41 +29,92 @@ const Hero = ({ onScanComplete }) => {
     setLoading(true);
 
     try {
-      // Initiate scan
-      const response = await axios.post(`${import.meta.env.VITE_API_URL}/api/scan`, {
-        url: url,
-      });
+      // Get or create session ID for anonymous users (only if not logged in)
+      let sessionId = null;
+      if (!user) {
+        sessionId = localStorage.getItem('scan_session_id');
+        if (!sessionId) {
+          sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          localStorage.setItem('scan_session_id', sessionId);
+        }
+      }
 
-      const { scanId } = response.data;
+      // Prepare request config
+      const config = {};
+      if (user && session) {
+        // If logged in, send auth token
+        config.headers = {
+          Authorization: `Bearer ${session.access_token}`,
+        };
+      }
+
+      // Initiate scan
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL}/api/scan`,
+        { 
+          url: url,
+          sessionId: sessionId, // Only send sessionId if not logged in
+        },
+        config
+      );
+
+      const { scanId, requiresAuth } = response.data;
+
+      // Store scan info for later (only for anonymous users)
+      if (!user) {
+        localStorage.setItem('pending_scan_id', scanId);
+        localStorage.setItem('pending_scan_url', url);
+      }
 
       // Poll for results
-      pollScanResults(scanId);
+      pollScanResults(scanId, sessionId, requiresAuth);
 
     } catch (err) {
       setLoading(false);
-      if (err.response && err.response.status === 429) {
-        setError(err.response.data.message || 'Rate limit exceeded. Please try again later.');
-      } else {
-        setError(err.response?.data?.error || 'Failed to start scan. Please try again.');
-      }
+      setError(err.response?.data?.error || 'Failed to start scan. Please try again.');
     }
   };
 
-  const pollScanResults = async (scanId) => {
-    const maxAttempts = 60; // Poll for up to 60 seconds
+  const pollScanResults = async (scanId, sessionId, requiresAuth) => {
+    const maxAttempts = 60;
     let attempts = 0;
 
     const poll = setInterval(async () => {
       attempts++;
 
       try {
-        const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/scan/${scanId}`);
-        const { scan } = response.data;
+        // Build URL with sessionId only if user is not logged in
+        let requestUrl = `${import.meta.env.VITE_API_URL}/api/scan/${scanId}`;
+        if (!user && sessionId) {
+          requestUrl += `?sessionId=${sessionId}`;
+        }
+
+        // Prepare request config
+        const config = {};
+        if (user && session) {
+          config.headers = {
+            Authorization: `Bearer ${session.access_token}`,
+          };
+        }
+
+        const response = await axios.get(requestUrl, config);
+
+        const { scan, accessLevel } = response.data;
 
         if (scan.status === 'completed') {
           clearInterval(poll);
           setLoading(false);
-          onScanComplete(scan);
+          
+          // Navigate to results page with scan data
+          navigate('/results', { 
+            state: { 
+              scan, 
+              scanId, 
+              sessionId: !user ? sessionId : null, // Only pass sessionId for anonymous users
+              accessLevel,
+              requiresAuth: !user // Only require auth if user is not logged in
+            } 
+          });
         } else if (scan.status === 'failed') {
           clearInterval(poll);
           setLoading(false);
@@ -75,7 +129,7 @@ const Hero = ({ onScanComplete }) => {
         setLoading(false);
         setError('Failed to retrieve scan results. Please try again.');
       }
-    }, 2000); // Poll every 2 seconds
+    }, 2000);
   };
 
   return (
@@ -118,10 +172,18 @@ const Hero = ({ onScanComplete }) => {
                 <span>Scanning...</span>
               </div>
             ) : (
-              'Get Your Free Scan'
+              user ? 'Run Your Scan' : 'Get Your Free Scan'
             )}
           </button>
         </form>
+
+        <p className="mt-4 text-sm text-gray-400">
+          {user ? (
+            '✨ Logged in • See full results instantly'
+          ) : (
+            '✨ Free scan • No credit card required • See results in 60 seconds'
+          )}
+        </p>
 
         {loading && (
           <div className="mt-6 text-gray-400 text-sm animate-fadeIn">

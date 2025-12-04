@@ -1,4 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import OutreachTab from './OutreachTab';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -21,31 +25,114 @@ ChartJS.register(
   Legend
 );
 
-const Dashboard = ({ scanData, onNewScan }) => {
-  const {
-    companyName,
-    industryDescription,
-    competitor,
-    brandVisibility,
-    sentiment,
-    brandRanking,
-    sources,
-    aiResponse,
-  } = scanData;
+const Dashboard = () => {
+  const { user, session, subscription, signOut } = useAuth();
+  const navigate = useNavigate();
+  const [stats, setStats] = useState(null);
+  const [historicalData, setHistoricalData] = useState(null);
+  const [sources, setSources] = useState([]);
+  const [competitors, setCompetitors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('overview');
 
-  // Chart data (locked for free users)
-  const chartData = {
-    labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+  const isPaid = subscription?.subscription_tier !== 'free';
+
+  useEffect(() => {
+    if (user && session) {
+      fetchDashboardData();
+    }
+  }, [user, session]);
+
+  const fetchDashboardData = async () => {
+    try {
+      const headers = {
+        Authorization: `Bearer ${session.access_token}`,
+      };
+
+      // Fetch stats
+      const statsRes = await axios.get(
+        `${import.meta.env.VITE_API_URL}/api/dashboard/stats`,
+        { headers }
+      );
+      setStats(statsRes.data.stats);
+
+      // Fetch historical data (paid only)
+      if (isPaid) {
+        const historicalRes = await axios.get(
+          `${import.meta.env.VITE_API_URL}/api/dashboard/historical?days=30`,
+          { headers }
+        );
+        setHistoricalData(historicalRes.data.data);
+
+        // Fetch sources
+        const sourcesRes = await axios.get(
+          `${import.meta.env.VITE_API_URL}/api/dashboard/sources`,
+          { headers }
+        );
+        setSources(sourcesRes.data.sources);
+
+        // Fetch competitors
+        const competitorsRes = await axios.get(
+          `${import.meta.env.VITE_API_URL}/api/dashboard/competitors`,
+          { headers }
+        );
+        setCompetitors(competitorsRes.data.competitors);
+      }
+
+      setLoading(false);
+    } catch (error) {
+      console.error('Failed to fetch dashboard data:', error);
+      setLoading(false);
+    }
+  };
+
+  const handleManageBilling = async () => {
+    try {
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL}/api/stripe/create-portal-session`,
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }
+      );
+
+      window.location.href = response.data.url;
+    } catch (error) {
+      console.error('Failed to open billing portal:', error);
+      alert('Failed to open billing portal. Please try again.');
+    }
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/');
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="spinner"></div>
+      </div>
+    );
+  }
+
+  // Chart configuration
+  const visibilityChartData = historicalData ? {
+    labels: historicalData.visibility.map(d => 
+      new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    ),
     datasets: [
       {
         label: 'Brand Visibility %',
-        data: [0, 0, 0, brandVisibility],
+        data: historicalData.visibility.map(d => d.value),
         borderColor: '#FFD100',
         backgroundColor: 'rgba(255, 209, 0, 0.1)',
         tension: 0.4,
       },
     ],
-  };
+  } : null;
 
   const chartOptions = {
     responsive: true,
@@ -76,279 +163,475 @@ const Dashboard = ({ scanData, onNewScan }) => {
     },
   };
 
-  const getSentimentColor = (sentiment) => {
-    switch (sentiment) {
-      case 'Positive':
-        return 'text-green-400';
-      case 'Negative':
-        return 'text-red-400';
-      default:
-        return 'text-yellow-400';
-    }
-  };
-
-  const getSentimentEmoji = (sentiment) => {
-    switch (sentiment) {
-      case 'Positive':
-        return '😊';
-      case 'Negative':
-        return '😟';
-      default:
-        return '😐';
-    }
-  };
-
   return (
-    <div className="min-h-screen py-16 animate-fadeIn">
-      <div className="container mx-auto px-4">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12">
-          <div>
-            <h1 className="text-4xl md:text-5xl font-doodle text-banana">
-              Your AI Visibility Report
-            </h1>
-            <p className="mt-2 text-gray-400">
-              Company: <span className="text-white font-bold">{companyName}</span>
-            </p>
-            <p className="text-gray-400">
-              Industry: {industryDescription}
-            </p>
-          </div>
-          <button
-            onClick={onNewScan}
-            className="mt-4 md:mt-0 bg-banana text-gray-900 px-6 py-3 rounded-lg font-bold hover:opacity-90 transition-all btn-banana"
-          >
-            Run New Scan
-          </button>
-        </div>
+    <div className="min-h-screen">
+      {/* Header */}
+      <header className="bg-card border-b border-gray-700 sticky top-0 z-10">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <h1 className="text-3xl font-doodle text-banana">banana</h1>
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
-          {/* Brand Visibility */}
-          <div className="bg-card p-6 rounded-2xl border border-gray-700">
-            <p className="text-sm text-gray-400 mb-2">Brand Visibility</p>
-            <p className="text-4xl font-bold text-banana">{brandVisibility}%</p>
-            <p className="text-xs text-gray-500 mt-2">
-              {brandVisibility > 50 ? 'Strong presence' : 'Needs improvement'}
-            </p>
-          </div>
+            <div className="flex items-center gap-4">
+              {/* Subscription Badge */}
+              <div className="hidden md:flex items-center gap-2 bg-gray-800 px-4 py-2 rounded-lg">
+                <span className="text-sm text-gray-400">Plan:</span>
+                <span className="text-sm font-bold text-banana capitalize">
+                  {subscription?.subscription_tier || 'free'}
+                </span>
+              </div>
 
-          {/* Sentiment */}
-          <div className="bg-card p-6 rounded-2xl border border-gray-700">
-            <p className="text-sm text-gray-400 mb-2">Sentiment</p>
-            <p className={`text-3xl font-bold ${getSentimentColor(sentiment)}`}>
-              {getSentimentEmoji(sentiment)} {sentiment}
-            </p>
-            <p className="text-xs text-gray-500 mt-2">AI perception</p>
-          </div>
-
-          {/* Brand Ranking */}
-          <div className="bg-card p-6 rounded-2xl border border-gray-700">
-            <p className="text-sm text-gray-400 mb-2">Brand Ranking</p>
-            <p className="text-4xl font-bold text-white">
-              #{brandRanking || 'N/A'}
-            </p>
-            <p className="text-xs text-gray-500 mt-2">
-              vs. {competitor}
-            </p>
-          </div>
-
-          {/* Top Competitor */}
-          <div className="bg-card p-6 rounded-2xl border border-gray-700">
-         <p className="text-sm text-gray-400 mb-2">Top Competitor</p>
-            <p className="text-2xl font-bold text-white truncate">{competitor}</p>
-            <p className="text-xs text-gray-500 mt-2">Main rival</p>
-          </div>
-        </div>
-
-        {/* Chart Section - LOCKED FOR FREE USERS */}
-        <div className="bg-card p-8 rounded-2xl border border-gray-700 mb-12 relative">
-          <h2 className="text-2xl font-bold mb-6">Visibility Trend</h2>
-          
-          {/* Blur overlay for free users */}
-          <div className="relative">
-            <div className="blur-sm pointer-events-none">
-              <Line data={chartData} options={chartOptions} />
-            </div>
-            
-            {/* Upgrade overlay */}
-            <div className="absolute inset-0 flex items-center justify-center bg-dark/80 rounded-lg">
-              <div className="text-center p-8">
-                <div className="text-6xl mb-4">🔒</div>
-                <h3 className="text-2xl font-bold mb-2">Unlock Historical Data</h3>
-                <p className="text-gray-400 mb-6 max-w-md">
-                  See how your visibility changes over time and track your progress with daily scans.
-                </p>
-                <button className="bg-banana text-gray-900 px-8 py-3 rounded-lg font-bold hover:opacity-90 transition-all btn-banana">
-                  Upgrade to Pro
+              {/* Manage Billing */}
+              {isPaid && (
+                <button
+                  onClick={handleManageBilling}
+                  className="hidden md:block text-sm text-gray-400 hover:text-white transition-colors"
+                >
+                  Manage Billing
                 </button>
+              )}
+
+              {/* User Menu */}
+              <div className="relative group">
+                <button className="flex items-center gap-2 bg-gray-800 px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors">
+                  <div className="w-8 h-8 bg-banana rounded-full flex items-center justify-center text-gray-900 font-bold">
+                    {user?.email?.charAt(0).toUpperCase()}
+                  </div>
+                  <span className="hidden md:block text-sm">{user?.email}</span>
+                </button>
+
+                {/* Dropdown */}
+                <div className="absolute right-0 mt-2 w-48 bg-gray-800 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">
+                  <div className="p-2">
+                    <button
+                      onClick={() => navigate('/settings')}
+                      className="w-full text-left px-4 py-2 text-sm hover:bg-gray-700 rounded-lg transition-colors"
+                    >
+                      Settings
+                    </button>
+                    {isPaid && (
+                      <button
+                        onClick={handleManageBilling}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-700 rounded-lg transition-colors"
+                      >
+                        Manage Billing
+                      </button>
+                    )}
+                    <button
+                      onClick={handleSignOut}
+                      className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-gray-700 rounded-lg transition-colors"
+                    >
+                      Sign Out
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
+      </header>
 
-        {/* AI Response Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
-          {/* AI Response */}
-          <div className="bg-card p-8 rounded-2xl border border-gray-700">
-            <h2 className="text-2xl font-bold mb-4">What AI Says</h2>
-            <div className="bg-gray-800 p-6 rounded-lg max-h-96 overflow-y-auto">
-              <p className="text-gray-300 leading-relaxed whitespace-pre-line">
-                {aiResponse}
-              </p>
-            </div>
+      {/* Main Content */}
+      <div className="container mx-auto px-4 py-8">
+        {/* Stats Overview */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <div className="bg-card p-6 rounded-xl border border-gray-700">
+            <p className="text-sm text-gray-400 mb-2">Total Scans</p>
+            <p className="text-4xl font-bold text-banana">{stats?.totalScans || 0}</p>
           </div>
 
-          {/* Sources */}
-          <div className="bg-card p-8 rounded-2xl border border-gray-700">
-            <h2 className="text-2xl font-bold mb-4">Sources Referenced</h2>
-            {sources && sources.length > 0 ? (
-              <div className="space-y-4 max-h-96 overflow-y-auto">
-                {sources.map((source, index) => (
-                  <div
-                    key={index}
-                    className="bg-gray-800 p-4 rounded-lg hover:bg-gray-750 transition-colors"
-                  >
-                    <p className="font-semibold text-banana mb-1">
-                      Source {index + 1}
-                    </p>
-                    <p className="text-sm text-gray-400 truncate">
-                      {source.url}
-                    </p>
-                    {source.title && (
-                      <p className="text-sm text-gray-300 mt-2">{source.title}</p>
-                    )}
+          <div className="bg-card p-6 rounded-xl border border-gray-700">
+            <p className="text-sm text-gray-400 mb-2">Average Visibility</p>
+            <p className="text-4xl font-bold text-white">{stats?.averageVisibility || 0}%</p>
+          </div>
+
+          <div className="bg-card p-6 rounded-xl border border-gray-700">
+            <p className="text-sm text-gray-400 mb-2">Latest Sentiment</p>
+            <p className="text-3xl font-bold text-white">
+              {stats?.latestScan?.sentiment || 'N/A'}
+            </p>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="bg-card rounded-xl border border-gray-700 overflow-hidden">
+          {/* Tab Headers */}
+          <div className="flex border-b border-gray-700 overflow-x-auto">
+            <button
+              onClick={() => setActiveTab('overview')}
+              className={`px-6 py-4 font-medium transition-colors whitespace-nowrap ${
+                activeTab === 'overview'
+                  ? 'text-banana border-b-2 border-banana'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Overview
+            </button>
+            <button
+              onClick={() => setActiveTab('historical')}
+              className={`px-6 py-4 font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${
+                activeTab === 'historical'
+                  ? 'text-banana border-b-2 border-banana'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Historical
+              {!isPaid && <span className="text-xs bg-banana/20 text-banana px-2 py-1 rounded">PRO</span>}
+            </button>
+            <button
+              onClick={() => setActiveTab('sources')}
+              className={`px-6 py-4 font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${
+                activeTab === 'sources'
+                  ? 'text-banana border-b-2 border-banana'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Sources
+              {!isPaid && <span className="text-xs bg-banana/20 text-banana px-2 py-1 rounded">PRO</span>}
+            </button>
+            <button
+              onClick={() => setActiveTab('competitors')}
+              className={`px-6 py-4 font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${
+                activeTab === 'competitors'
+                  ? 'text-banana border-b-2 border-banana'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Competitors
+              {!isPaid && <span className="text-xs bg-banana/20 text-banana px-2 py-1 rounded">PRO</span>}
+            </button>
+            <button
+              onClick={() => setActiveTab('outreach')}
+              className={`px-6 py-4 font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${
+                activeTab === 'outreach'
+                  ? 'text-banana border-b-2 border-banana'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Outreach
+              {!isPaid && <span className="text-xs bg-banana/20 text-banana px-2 py-1 rounded">PRO</span>}
+            </button>
+            <button
+              onClick={() => setActiveTab('blogs')}
+              className={`px-6 py-4 font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${
+                activeTab === 'blogs'
+                  ? 'text-banana border-b-2 border-banana'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              My Blogs
+              {!isPaid && <span className="text-xs bg-banana/20 text-banana px-2 py-1 rounded">PRO</span>}
+            </button>
+          </div>
+
+          {/* Tab Content */}
+          <div className="p-6">
+            {/* Overview Tab */}
+            {activeTab === 'overview' && (
+              <div>
+                <h3 className="text-2xl font-bold mb-6">Welcome back!</h3>
+                {stats?.latestScan ? (
+                  <div className="bg-gray-800 p-6 rounded-lg">
+                    <h4 className="font-bold mb-4">Latest Scan: {stats.latestScan.companyName}</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-sm text-gray-400">Visibility</p>
+                        <p className="text-2xl font-bold text-banana">{stats.latestScan.visibility}%</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-400">Sentiment</p>
+                        <p className="text-2xl font-bold">{stats.latestScan.sentiment}</p>
+                      </div>
+                    </div>
                   </div>
-                ))}
+                ) : (
+                  <div className="text-center py-12">
+                    <p className="text-gray-400 mb-4">No scans yet. Run your first scan!</p>
+                    <button
+                      onClick={() => navigate('/')}
+                      className="bg-banana text-gray-900 px-6 py-3 rounded-lg font-bold hover:opacity-90 transition-all"
+                    >
+                      Run a Scan
+                    </button>
+                  </div>
+                )}
               </div>
-            ) : (
-              <p className="text-gray-400">No sources found in this scan.</p>
+            )}
+
+            {/* Historical Tab */}
+            {activeTab === 'historical' && (
+              <div>
+                {isPaid && historicalData ? (
+                  <div>
+                    <h3 className="text-2xl font-bold mb-6">Visibility Over Time</h3>
+                    <Line data={visibilityChartData} options={chartOptions} />
+                  </div>
+                ) : (
+                  <UpgradePrompt feature="Historical Tracking" />
+                )}
+              </div>
+            )}
+
+            {/* Sources Tab */}
+            {activeTab === 'sources' && (
+              <div>
+                {isPaid && sources.length > 0 ? (
+                  <div>
+                    <div className="flex justify-between items-center mb-6">
+                      <h3 className="text-2xl font-bold">Source Analysis</h3>
+                      <button
+                        onClick={() => navigate('/source-analyzer')}
+                        className="bg-banana text-gray-900 px-4 py-2 rounded-lg font-bold text-sm hover:opacity-90"
+                      >
+                        + Analyze New Source
+                      </button>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-gray-700">
+                            <th className="text-left py-3 px-4 text-gray-400">Source</th>
+                            <th className="text-left py-3 px-4 text-gray-400">Author</th>
+                            <th className="text-left py-3 px-4 text-gray-400">Mentions</th>
+                            <th className="text-left py-3 px-4 text-gray-400">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sources.map((source) => (
+                            <tr key={source.id} className="border-b border-gray-700">
+                              <td className="py-3 px-4">
+                                {source.url ? (
+                                  <a
+                                    href={source.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-banana hover:underline"
+                                  >
+                                    {source.title || source.domain}
+                                  </a>
+                                ) : (
+                                  <span className="text-banana">{source.title || source.domain}</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4">{source.author || 'Unknown'}</td>
+                              <td className="py-3 px-4">{source.mentions_count}</td>
+                              <td className="py-3 px-4">
+                                <span className="text-xs bg-gray-700 px-2 py-1 rounded capitalize">
+                                  {(source.outreach_status || '').replace('_', ' ')}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : isPaid ? (
+                  <div className="text-center py-12">
+                    <p className="text-gray-400 mb-4">No sources found yet.</p>
+                    <button
+                      onClick={() => navigate('/source-analyzer')}
+                      className="bg-banana text-gray-900 px-6 py-3 rounded-lg font-bold hover:opacity-90"
+                    >
+                      Analyze Your First Source
+                    </button>
+                  </div>
+                ) : (
+                  <UpgradePrompt feature="Source Analysis" />
+                )}
+              </div>
+            )}
+
+            {/* Competitors Tab */}
+            {activeTab === 'competitors' && (
+              <div>
+                {isPaid && competitors.length > 0 ? (
+                  <div>
+                    <h3 className="text-2xl font-bold mb-6">Competitor Analysis</h3>
+                    <div className="space-y-4">
+                      {competitors.map((competitor) => (
+                        <div key={competitor.id} className="bg-gray-800 p-4 rounded-lg">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <h4 className="font-bold">{competitor.competitor_name}</h4>
+                              <p className="text-sm text-gray-400 mt-1">{competitor.industry}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-2xl font-bold text-banana">
+                                {competitor.latest_visibility}%
+                              </p>
+                              <p className="text-sm text-gray-400">Visibility</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : isPaid ? (
+                  <div className="text-center py-12">
+                    <p className="text-gray-400">No competitors tracked yet.</p>
+                  </div>
+                ) : (
+                  <UpgradePrompt feature="Competitor Analysis" />
+                )}
+              </div>
+            )}
+
+            {/* Outreach Tab */}
+            {activeTab === 'outreach' && (
+              <div>
+                {isPaid ? (
+                  <OutreachTab />
+                ) : (
+                  <UpgradePrompt feature="Outreach Management" />
+                )}
+              </div>
+            )}
+
+            {/* My Blogs Tab */}
+            {activeTab === 'blogs' && (
+              <div>
+                {isPaid ? (
+                  <MyBlogsTab navigate={navigate} />
+                ) : (
+                  <UpgradePrompt feature="Blog Generation" />
+                )}
+              </div>
             )}
           </div>
         </div>
-
-        {/* Competitor Analysis - LOCKED */}
-        <div className="bg-card p-8 rounded-2xl border border-gray-700 mb-12 relative">
-          <h2 className="text-2xl font-bold mb-6">Competitor Analysis</h2>
-          
-          <div className="blur-sm pointer-events-none">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-700">
-                  <th className="text-left py-3 px-4 text-gray-400">Rank</th>
-                  <th className="text-left py-3 px-4 text-gray-400">Company</th>
-                  <th className="text-left py-3 px-4 text-gray-400">Visibility</th>
-                  <th className="text-left py-3 px-4 text-gray-400">Mentions</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-b border-gray-700">
-                  <td className="py-3 px-4">1</td>
-                  <td className="py-3 px-4">{competitor}</td>
-                  <td className="py-3 px-4">85%</td>
-                  <td className="py-3 px-4">42</td>
-                </tr>
-                <tr className="border-b border-gray-700">
-                  <td className="py-3 px-4">2</td>
-                  <td className="py-3 px-4">{companyName}</td>
-                  <td className="py-3 px-4">{brandVisibility}%</td>
-                  <td className="py-3 px-4">12</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          {/* Upgrade overlay */}
-          <div className="absolute inset-0 flex items-center justify-center bg-dark/80 rounded-lg">
-            <div className="text-center p-8">
-              <div className="text-6xl mb-4">🔒</div>
-              <h3 className="text-2xl font-bold mb-2">Unlock Competitor Insights</h3>
-              <p className="text-gray-400 mb-6 max-w-md">
-                Compare yourself against competitors and discover opportunities to outrank them.
-              </p>
-              <button className="bg-banana text-gray-900 px-8 py-3 rounded-lg font-bold hover:opacity-90 transition-all btn-banana">
-                Upgrade to Pro
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Action Items - LOCKED */}
-        <div className="bg-card p-8 rounded-2xl border border-gray-700 relative">
-          <h2 className="text-2xl font-bold mb-6">Recommended Actions</h2>
-          
-          <div className="blur-sm pointer-events-none space-y-4">
-            <div className="flex items-start gap-4">
-              <div className="w-8 h-8 bg-banana rounded-full flex items-center justify-center text-gray-900 font-bold flex-shrink-0">
-                1
-              </div>
-              <div>
-                <h3 className="font-bold">Optimize Your Content for AI Citations</h3>
-                <p className="text-gray-400 mt-1">
-                  Update your content to improve chances of being cited by AI models.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-start gap-4">
-              <div className="w-8 h-8 bg-banana rounded-full flex items-center justify-center text-gray-900 font-bold flex-shrink-0">
-                2
-              </div>
-              <div>
-                <h3 className="font-bold">Contact Key Source Publishers</h3>
-                <p className="text-gray-400 mt-1">
-                  Reach out to websites that AI frequently references in your industry.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-start gap-4">
-              <div className="w-8 h-8 bg-banana rounded-full flex items-center justify-center text-gray-900 font-bold flex-shrink-0">
-                3
-              </div>
-              <div>
-                <h3 className="font-bold">Generate AI-Optimized Content</h3>
-                <p className="text-gray-400 mt-1">
-                  Create content specifically designed to rank in AI search results.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Upgrade overlay */}
-          <div className="absolute inset-0 flex items-center justify-center bg-dark/80 rounded-lg">
-            <div className="text-center p-8">
-              <div className="text-6xl mb-4">🔒</div>
-              <h3 className="text-2xl font-bold mb-2">Unlock Action Plan</h3>
-              <p className="text-gray-400 mb-6 max-w-md">
-                Get personalized, step-by-step guidance to improve your AI visibility.
-              </p>
-              <button className="bg-banana text-gray-900 px-8 py-3 rounded-lg font-bold hover:opacity-90 transition-all btn-banana">
-                Upgrade to Pro
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* CTA Section */}
-        <div className="mt-16 text-center bg-gradient-to-r from-banana/10 to-banana/5 p-12 rounded-2xl border border-banana/20">
-          <h2 className="text-4xl md:text-5xl font-doodle mb-4">
-            Ready to dominate AI Search?
-          </h2>
-          <p className="text-gray-300 text-lg mb-8 max-w-2xl mx-auto">
-            Upgrade to unlock daily tracking, competitor analysis, content generation, and more.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <button className="bg-banana text-gray-900 px-8 py-4 rounded-lg font-bold text-lg hover:opacity-90 transition-all btn-banana">
-              View Pricing Plans
-            </button>
-            <button
-              onClick={onNewScan}
-              className="bg-gray-800 text-white px-8 py-4 rounded-lg font-bold text-lg hover:bg-gray-700 transition-all"
-            >
-              Run Another Free Scan
-            </button>
-          </div>
-        </div>
       </div>
+    </div>
+  );
+};
+
+// My Blogs Tab Component
+const MyBlogsTab = ({ navigate }) => {
+  const { session } = useAuth();
+  const [blogs, setBlogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    fetchBlogs();
+  }, []);
+
+  const fetchBlogs = async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get(
+        `${import.meta.env.VITE_API_URL}/api/blog?limit=10`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }
+      );
+
+      setBlogs(response.data.posts);
+      setError('');
+      setLoading(false);
+
+    } catch (err) {
+      console.error('Failed to fetch blogs:', err);
+      setError('Failed to load blog posts');
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return <div className="spinner"></div>;
+  }
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-6">
+        <h3 className="text-2xl font-bold">My Blogs</h3>
+        <button
+          onClick={() => navigate('/blog-generator')}
+          className="bg-banana text-gray-900 px-4 py-2 rounded-lg font-bold text-sm hover:opacity-90"
+        >
+          + Create New Blog
+        </button>
+      </div>
+
+      {error && (
+        <div className="bg-red-500/20 border border-red-500 text-red-200 px-4 py-3 rounded-lg mb-6">
+          {error}
+        </div>
+      )}
+
+      {blogs.length === 0 ? (
+        <div className="text-center py-12 bg-gray-800 rounded-lg">
+          <p className="text-gray-400 mb-4">No blog posts yet. Create your first one!</p>
+          <button
+            onClick={() => navigate('/blog-generator')}
+            className="bg-banana text-gray-900 px-6 py-3 rounded-lg font-bold hover:opacity-90"
+          >
+            Generate Blog Post
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {blogs.map((blog) => (
+            <div key={blog.id} className="bg-gray-800 p-4 rounded-lg border border-gray-700 hover:border-banana transition-colors">
+              <div className="flex items-center justify-between mb-3">
+                <span
+                  className={`text-xs font-bold px-2 py-1 rounded capitalize ${
+                    blog.status === 'draft'
+                      ? 'bg-gray-600 text-gray-200'
+                      : blog.status === 'published'
+                      ? 'bg-green-500/20 text-green-300'
+                      : 'bg-gray-500/20 text-gray-300'
+                  }`}
+                >
+                  {blog.status}
+                </span>
+                <span className="text-xs text-gray-400">
+                  {new Date(blog.createdAt).toLocaleDateString()}
+                </span>
+              </div>
+
+              <h4 className="font-bold text-sm mb-2 line-clamp-2">
+                {blog.title}
+              </h4>
+
+              {blog.targetKeyword && (
+                <p className="text-xs text-banana mb-3">
+                  {blog.targetKeyword}
+                </p>
+              )}
+
+              <button
+                onClick={() => navigate(`/blog/${blog.id}`)}
+                className="w-full bg-banana text-gray-900 px-3 py-2 rounded font-bold text-xs hover:opacity-90 transition-all"
+              >
+                View
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Upgrade Prompt Component
+const UpgradePrompt = ({ feature }) => {
+  const navigate = useNavigate();
+
+  return (
+    <div className="text-center py-16">
+      <div className="text-6xl mb-4">🔒</div>
+      <h3 className="text-2xl font-bold mb-2">Unlock {feature}</h3>
+      <p className="text-gray-400 mb-6 max-w-md mx-auto">
+        Upgrade to a paid plan to access {feature.toLowerCase()} and take full control of your AI visibility.
+      </p>
+      <button
+        onClick={() => navigate('/pricing')}
+        className="bg-banana text-gray-900 px-8 py-3 rounded-lg font-bold hover:opacity-90 transition-all"
+      >
+        View Pricing Plans
+      </button>
     </div>
   );
 };
